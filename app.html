@@ -27,6 +27,49 @@
   <link rel="modulepreload" href="firebase.js">
   <!-- ★ OneSignal（プッシュ通知） -->
   <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <!-- ★ 起動診断：読み込みが止まったとき、原因を画面に出す（iPhoneなどコンソールが見られない環境用） -->
+  <script>
+    (function () {
+      var shown = false;
+      function overlayVisible() {
+        var ov = document.getElementById("loading-overlay");
+        return !!ov && !ov.classList.contains("hidden");
+      }
+      function show(msg) {
+        var p = document.getElementById("loading-overlay-text") || document.querySelector("#loading-overlay p");
+        if (!p) return;
+        p.textContent = msg;
+        p.style.whiteSpace = "pre-line";
+        shown = true;
+      }
+      window.addEventListener("error", function (e) {
+        if (!overlayVisible()) return;
+        var t = e.target;
+        if (t && t !== window && (t.src || t.href)) {
+          var url = t.src || t.href;
+          // 自分のファイルとFirebaseのファイルだけを対象にする（フォント等の失敗では表示しない）
+          if (url.indexOf(location.origin) === 0 || url.indexOf("gstatic.com/firebasejs") !== -1) {
+            show("ファイルを読み込めませんでした:\n" + url);
+          }
+          return;
+        }
+        show("エラー: " + (e.message || "不明なエラー"));
+      }, true);
+      window.addEventListener("unhandledrejection", function (e) {
+        if (!overlayVisible()) return;
+        var r = e.reason;
+        show("エラー: " + ((r && r.message) || r));
+      });
+      setTimeout(function () {
+        if (shown || !overlayVisible()) return;
+        if (!window.__fbLoaded) {
+          show("Firebaseのファイルを読み込めていません。\n・firebase.js / userCache.js をサーバーに置いたか\n・ブラウザのキャッシュを消して再読み込み\nを確認してください。");
+        } else {
+          show("Firebaseの読み込みは完了していますが、初期化が終わりません。\nログイン状態の確認、またはデータベースの接続で止まっています。");
+        }
+      }, 12000);
+    })();
+  </script>
 </head>
   
 <body>

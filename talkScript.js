@@ -2,7 +2,7 @@ import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPus
 import {
   auth, db, onAuthStateChanged, signOut,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, onSnapshot,
-  query, where, orderBy, documentId, writeBatch, serverTimestamp, arrayUnion, increment, Timestamp, clearFirestoreLocalCache
+  query, where, orderBy, documentId, writeBatch, serverTimestamp, arrayUnion, increment, Timestamp
 } from "./firebase.js";
 import { getUserCache, setUserCache, isUserCacheFresh, clearUserCache } from "./userCache.js";
 
@@ -440,7 +440,6 @@ const handleLogout = async () => {
     try {
       await logoutPush(); // ★ この端末への通知紐づけを解除
       clearUserCache(); // ★ 端末に残っているユーザー情報のキャッシュを消す
-      await clearFirestoreLocalCache(); // ★ Firestoreの永続キャッシュも消す（共用端末対策）
       await signOut(auth);
       console.log("ログアウトしました！");
       await AppDialog.alert("ログアウトしました。");
