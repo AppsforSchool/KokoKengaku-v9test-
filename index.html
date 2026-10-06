@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+  
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#007AB7">
+  <title>高校見学</title>
+  <meta name="apple-mobile-web-app-capable" content="yes"> 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="icon-512.png">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-512.png">
+  
+  <!-- ★ Firebase（モジュラーSDK）。先読みして、JSの実行開始を早める -->
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js">
+  <link rel="modulepreload" href="firebase.js">
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+</head>
+  
+<body>
+  <div id="loading-overlay">
+    <h1>loading...</h1>
+    <p>ログインシステムの読み込みに時間がかかる場合があります｡</p>
+  </div>
+  
+  <div id="qr-login-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">QRコードで入力</p>
+        <span id="qr-login-modal-close" class="close-button">&times;</span>
+      </div>
+      <div id="login-qr-reader" style="width: 100%; max-width: 500px; margin: auto;"></div>
+      
+      <div id="qr-login-failure" class="hidden">
+        <p>非対応のQRコードです｡</p>
+        <button id="qr-login-retry">もう一度</button>
+      </div>
+    </div>
+  </div>
+  
+  <div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">シェア</p>
+        <span id="share-modal-close" class="close-button">&times;</span>
+      </div>
+      <img src="qrcode.png" alt="QR Code">
+    </div>
+  </div>
+  
+  <header id="app-header">
+    <p id="header-title">高校見学</p>
+    <button id="share-modal-btn">シェア</button>
+  </header>
+  
+  <main>
+    <div id="login-container">
+      <p id="login-title">ログイン</p>
+      <p class="login-subtitle" id="to-pc">このサイトを利用するには、ログインが必要です。</p>
+      <p class="login-subtitle" id="to-sp">このサイトを利用するには、<br>ログインが必要です。</p>
+      
+      <div id="login-input">
+        <input type="text" id="id" placeholder="ID">
+        <input type="password" id="password" placeholder="パスワード">
+        <a id="qr-login-button">QRコードで入力</a>
+        
+        <button type="submit" id="login-button" disabled="true">ログイン</button>
+        <p id="error-message"></p>
+      </div>
+    </div>
+  </main>
+  
+  <footer>
+    <p>QRコードは株式会社デンソーウェーブの登録商標です。</p>
+  </footer>
+  
+  <script type="module" src="script.js"></script>
+</body>
+</html>
