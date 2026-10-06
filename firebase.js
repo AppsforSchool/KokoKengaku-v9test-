@@ -2,13 +2,13 @@
 //   これまで index/talk/app の各HTMLで読み込んでいた「compat（互換）」版のスクリプト3本と、
 //   各JSに重複して書かれていた firebaseConfig を、このファイルにまとめた。
 //   使う関数だけを import するので、互換レイヤー分のコードを読み込まずに済む。
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
   getFirestore,
   collection,
@@ -28,7 +28,7 @@ import {
   serverTimestamp,
   arrayUnion,
   Timestamp
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",

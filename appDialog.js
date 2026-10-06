@@ -56,3 +56,7 @@ const AppDialog = (() => {
 
   return { confirm: confirmDialog, alert: alertDialog };
 })();
+
+// ★ トップレベルの const は window のプロパティにならないため、notify.js の window.AppDialog から
+//   参照できるように明示的に公開する（これが無いと通知まわりのメッセージが標準の alert() になる）
+window.AppDialog = AppDialog;
