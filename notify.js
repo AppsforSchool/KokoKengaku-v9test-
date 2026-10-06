@@ -4,6 +4,7 @@
 //   ★ サイトごとにOneSignalのアプリを分ける場合は、ここのドキュメントIDだけをサイトごとに変える
 //     （チャットサイト: "onesignal" / 問題投稿サイト: "onesignal_ProblemPosting"）
 import { collection, doc, getDoc, getDocs } from "./firebase.js";
+import { getCachedUserList } from "./userCache.js";
 
 const KEY_DOC_ID = "onesignal";
 
@@ -253,11 +254,18 @@ export async function sendPushToUsers(db, { targetIds, title, body, url, topic }
 //   失敗しても呼び出し元の処理には影響させない
 export async function sendProfileChangeNotification(db, { senderId, userName }) {
   try {
-    const snapshot = await getDocs(collection(db, "users_random"));
-    const ids = snapshot.docs
-      .filter((doc) => (doc.data() || {}).isActive !== false)
-      .map((doc) => doc.id)
-      .filter((id) => id !== senderId);
+    // ★ 3時間以内に取得したユーザー一覧（isActive な人だけ）があれば、users_random 全件を読み直さずにそれを使う
+    const cachedList = getCachedUserList();
+    let allIds;
+    if (cachedList) {
+      allIds = cachedList.map((u) => u.userId);
+    } else {
+      const snapshot = await getDocs(collection(db, "users_random"));
+      allIds = snapshot.docs
+        .filter((d) => (d.data() || {}).isActive !== false)
+        .map((d) => d.id);
+    }
+    const ids = allIds.filter((id) => id !== senderId);
     await sendPushToUsers(db, {
       targetIds: ids,
       title: "プロフィール変更",

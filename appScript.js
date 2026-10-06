@@ -2,8 +2,11 @@ import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification } 
 import {
   auth, db, onAuthStateChanged, signOut,
   collection, doc, getDoc, getDocs, setDoc, addDoc, onSnapshot,
-  query, where, getCountFromServer, serverTimestamp
+  query, where, getCountFromServer, serverTimestamp, clearFirestoreLocalCache
 } from "./firebase.js";
+import {
+  getUserCache, setUserCache, isUserCacheFresh, getCachedUserList, setCachedUserList, clearUserCache
+} from "./userCache.js";
 
 
 let myUid = "";
@@ -18,8 +21,8 @@ function toMillisOrNull(value) {
   return null;
 }
 
-// ★ 景品(名前が虹色に光る演出)の持続時間。「問題投稿」アプリ側の仕様に合わせて10分間
-const PRIZE_DURATION_MS = 10 * 60 * 1000;
+// ★ 景品(名前が虹色に光る演出)の持続時間。3日間
+const PRIZE_DURATION_MS = 3 * 24 * 60 * 60 * 1000;
 
 // ★ 景品が、付与されてからまだ持続時間内（＝現在も有効）かどうか
 function hasActivePrize(cached) {
@@ -41,20 +44,7 @@ let drawerLogoutButton;
 let drawerUsername;
 let drawerEditProfileButton; // ドロワーの「プロフィールを編集」ボタン
 
-// キャッシュ用オブジェクト
-// ★ ユーザーデータの統一キャッシュ（name / isAdmin / imageUrl / profileText / prizeGrantedAt をまとめて保持）
-let userDataCache = {};
-function getUserCache(userId) {
-  return userDataCache[userId] || null;
-}
-function setUserCache(userId, data) {
-  const normalized = Object.assign({}, data);
-  if ("prizeGrantedAt" in normalized) {
-    normalized.prizeGrantedAt = toMillisOrNull(normalized.prizeGrantedAt);
-  }
-  userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, normalized);
-  return userDataCache[userId];
-}
+// ★ ユーザーデータのキャッシュは userCache.js に移した（localStorageにも保存され、3時間で古い扱いになる）
 
 // ★ アバターの頭文字を安全に取り出すヘルパー
 function getInitial(name) {
@@ -213,6 +203,8 @@ const handleLogout = async () => {
   if (isConfirmed) {
     try {
     await logoutPush(); // ★ この端末への通知紐づけを解除
+    clearUserCache(); // ★ 端末に残っているユーザー情報のキャッシュを消す
+    await clearFirestoreLocalCache(); // ★ Firestoreの永続キャッシュも消す（共用端末対策）
     await signOut(auth);
     console.log("ログアウトしました！");
     await AppDialog.alert("ログアウトしました。");
@@ -439,6 +431,7 @@ async function openProfileModal(userId, startEditMode = false) {
   // ★ キャッシュがあれば先にそれを表示し（体感速度優先）、裏で最新データに更新する
   const cached = getUserCache(userId);
   const hasCachedProfileText = !!cached && cached.profileText !== undefined;
+  const isProfileCacheFresh = hasCachedProfileText && isUserCacheFresh(userId);
   profileName.textContent = (cached && cached.name) || "取得中...";
   profileName.classList.toggle("admin", !!(cached && cached.isAdmin));
   profileName.classList.toggle("prize", !!cached && !cached.isAdmin && hasActivePrize(cached));
@@ -453,8 +446,8 @@ async function openProfileModal(userId, startEditMode = false) {
   profileEditButton.classList.toggle("hidden", !canEditCurrentProfile);
   profileModal.classList.remove("hidden");
 
-  // ★ すでにステータスメッセージまでキャッシュ済みなら、Firestoreへは再取得しに行かない
-  if (hasCachedProfileText) {
+  // ★ ステータスメッセージまで3時間以内にキャッシュ済みなら、Firestoreへは再取得しに行かない
+  if (isProfileCacheFresh) {
     if (canEditCurrentProfile && startEditMode) {
       handleProfileEditOrSave();
     }
@@ -568,6 +561,9 @@ function regroupTalkButtons(talkButtonArea) {
 //   「全ルーム未読」になる不具合があったため、専用のリアルタイムリスナーで受け取る方式に変更した
 //   （※この不具合の原因だった「ユーザー一覧」機能自体は、その後削除している）。
 let currentUserLastCheckedMap = {};
+// ★ 自分の users_random/{id}.unreadCounts（送信側が加算してくれる未読カウンター）。
+//   値があるルームは、メッセージを数えるクエリを使わず、この値をそのまま未読数として表示する
+let currentUserUnreadCounts = {};
 let userDocUnsubscribeForUnread = null;
 let renderedRoomIds = new Set(); // 画面に表示中のルームID（lastCheckedが更新された時に再計算する対象）
 let isInitialTalkListLoad = true; // ★ 初回のトーク一覧表示かどうか（進捗表示・オーバーレイの制御に使う）
@@ -630,6 +626,13 @@ function getUserDisplayName(userId) {
 
 // ★ 個人タブ用に全ユーザーを読み込む（名前・アイコンはユーザーキャッシュにも反映する）
 async function loadAllUsers() {
+  // ★ 3時間以内に取得した一覧があれば、users_random 全件を読み直さずにそれを使う
+  const cachedList = getCachedUserList();
+  if (cachedList) {
+    allUsersList = cachedList.map((u) => Object.assign({}, u, { name: (getUserCache(u.userId) || {}).name || u.name }));
+    allUsersCache = allUsersList.filter((u) => u.userId !== myUserId);
+    return;
+  }
   try {
     const snapshot = await getDocs(collection(db, "users_random"));
     allUsersList = snapshot.docs.map((doc) => {
@@ -647,6 +650,7 @@ async function loadAllUsers() {
         no: typeof d.no === "number" ? d.no : Infinity
       };
     }).filter((u) => u.isActive).sort((a, b) => a.no - b.no);
+    setCachedUserList(allUsersList);   // ★ 次回以降（3時間以内）の読み込みに使い回す
 
     // グループ作成モーダルのメンバー選択にも使い回す（自分は自動追加なので除く）
     allUsersCache = allUsersList.filter((u) => u.userId !== myUserId);
@@ -915,7 +919,9 @@ async function getAllTalkData() {
       setLoadingStage("最終確認情報を読み込んでいます...", 15);
     }
     const initialUserSnapshot = await getDoc(doc(db, "users_random", myUserId));
-    currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
+    const initialUserData = initialUserSnapshot.data() || {};
+    currentUserLastCheckedMap = initialUserData.lastChecked || {};
+    currentUserUnreadCounts = initialUserData.unreadCounts || {};
   } catch (error) {
     console.error("最終確認情報の初期取得エラー:", error);
   }
@@ -930,11 +936,19 @@ async function getAllTalkData() {
   userDocUnsubscribeForUnread = onSnapshot(doc(db, "users_random", myUserId),
     (userDoc) => {
       const userData = userDoc.data() || {};
+      const previousLastChecked = currentUserLastCheckedMap;
+      const previousUnreadCounts = currentUserUnreadCounts;
       currentUserLastCheckedMap = userData.lastChecked || {};
+      currentUserUnreadCounts = userData.unreadCounts || {};
 
-      // 自分の既読状態が更新されたら、すでに表示中の全ルームの未読数を再計算する
+      // 自分の既読状態・未読カウンターが「変わったルームだけ」未読数を更新する
+      //（以前は、どれか1つ変わるたびに表示中の全ルームを数え直していた）
       renderedRoomIds.forEach((roomId) => {
-        updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+        const counterChanged = previousUnreadCounts[roomId] !== currentUserUnreadCounts[roomId];
+        const checkedChanged = toMillisOrNull(previousLastChecked[roomId]) !== toMillisOrNull(currentUserLastCheckedMap[roomId]);
+        if (counterChanged || checkedChanged) {
+          updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+        }
       });
     }, (error) => {
       console.error("最終確認情報の監視エラー:", error);
@@ -1095,6 +1109,26 @@ async function getAllTalkData() {
 // ★ 特定の1部屋だけ未読数を数え直して画面を書き換える関数
 async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   if (!document.getElementById(`unread-${roomId}`)) return;
+
+  // ★ まず未読カウンターを使う（クエリ不要・読み取り0回）。
+  //   ただし「カウンターは0なのに、最終確認より後にルームが更新されている」場合は、
+  //   カウンターが加算されていない可能性があるので、念のため従来どおりメッセージを数えて確かめる
+  //   （カウンター導入前の未読・加算の失敗などで、未読が0表示になってしまうのを防ぐ）。
+  //   カウンターがまだ無いルーム（undefined）も、従来どおり数える。
+  const counter = currentUserUnreadCounts[roomId];
+  if (typeof counter === "number") {
+    const meta = roomMetaMap[roomId];
+    const lastCheckedMs = toMillisOrNull(lastCheckedTimestamp) || 0;
+    const looksInconsistent = counter <= 0 && meta && meta.lastUpdatedAtMs > lastCheckedMs;
+    if (!looksInconsistent) {
+      const count = Math.max(0, counter);
+      unreadCountCache[roomId] = count;
+      const counterArea = document.getElementById(`unread-${roomId}`);
+      if (counterArea) applyUnreadToElement(counterArea, count);
+      updateTabBadges();
+      return;
+    }
+  }
 
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
   const baseQuery = query(

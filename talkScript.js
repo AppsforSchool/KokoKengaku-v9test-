@@ -2,8 +2,9 @@ import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPus
 import {
   auth, db, onAuthStateChanged, signOut,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, onSnapshot,
-  query, where, orderBy, documentId, writeBatch, serverTimestamp, arrayUnion, Timestamp
+  query, where, orderBy, documentId, writeBatch, serverTimestamp, arrayUnion, increment, Timestamp, clearFirestoreLocalCache
 } from "./firebase.js";
+import { getUserCache, setUserCache, isUserCacheFresh, clearUserCache } from "./userCache.js";
 
 
 let myUserId = "";
@@ -12,20 +13,7 @@ let meIsAdmin = false;
 
 let talkId;
 
-// キャッシュ用オブジェクト
-// ★ ユーザーデータの統一キャッシュ（name / isAdmin / imageUrl / profileText をまとめて保持）
-let userDataCache = {};
-function getUserCache(userId) {
-  return userDataCache[userId] || null;
-}
-function setUserCache(userId, data) {
-  const normalized = Object.assign({}, data);
-  if ("prizeGrantedAt" in normalized) {
-    normalized.prizeGrantedAt = toMillisOrNull(normalized.prizeGrantedAt);
-  }
-  userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, normalized);
-  return userDataCache[userId];
-}
+// ★ ユーザーデータのキャッシュは userCache.js に移した（localStorageにも保存され、3時間で古い扱いになる）
 
 // ★ Firestoreのタイムスタンプ(またはミリ秒数値)を、比較に使いやすいミリ秒数値へ揃える
 function toMillisOrNull(value) {
@@ -35,8 +23,8 @@ function toMillisOrNull(value) {
   return null;
 }
 
-// ★ 景品(名前が虹色に光る演出)の持続時間。「問題投稿」アプリ側の仕様に合わせて10分間
-const PRIZE_DURATION_MS = 10 * 60 * 1000;
+// ★ 景品(名前が虹色に光る演出)の持続時間。3日間
+const PRIZE_DURATION_MS = 3 * 24 * 60 * 60 * 1000;
 
 // ★ 景品が、付与されてからまだ持続時間内（＝現在も有効）かどうか
 function hasActivePrize(cached) {
@@ -45,14 +33,14 @@ function hasActivePrize(cached) {
 }
 
 // ★ 複数ユーザーの情報を「1件ずつ直列await」ではなく、まとめて（最大30件ずつの"in"クエリで）取得する共通ヘルパー。
-//   個別に.get()するより大幅に高速。デフォルトではキャッシュ済みのIDは除外するが、
+//   個別に.get()するより大幅に高速。デフォルトでは「3時間以内にキャッシュ済み」のIDは除外するが、
 //   forceRefresh:trueで強制的に最新化できる。lastCheckedTalkIdを渡すと、そのトークの
 //   最終確認日時(userLastCheckedCache)も同時に更新する。
 async function fetchAndCacheUsers(userIds, options = {}) {
   const { forceRefresh = false, lastCheckedTalkId = null } = options;
 
   const idsToFetch = Array.from(new Set(userIds)).filter(
-    (id) => id && (forceRefresh || !getUserCache(id))
+    (id) => id && (forceRefresh || !isUserCacheFresh(id))
   );
   if (idsToFetch.length === 0) return;
 
@@ -436,7 +424,8 @@ async function setupMemberSnapshots(talkId) {
     memberSubscribers.forEach(unsub => unsub());
     memberSubscribers = [];
 
-    await fetchAndCacheUsers(memberUserIds, { forceRefresh: true, lastCheckedTalkId: talkId });
+    // ★ 3時間以内にキャッシュ済みのメンバーは読み直さない（最終確認日時は、メンバー一覧モーダルを開いたときに取得する）
+    await fetchAndCacheUsers(memberUserIds);
 
     return roomSnapshot;
   } catch (error) {
@@ -450,6 +439,8 @@ const handleLogout = async () => {
   if (isConfirmed) {
     try {
       await logoutPush(); // ★ この端末への通知紐づけを解除
+      clearUserCache(); // ★ 端末に残っているユーザー情報のキャッシュを消す
+      await clearFirestoreLocalCache(); // ★ Firestoreの永続キャッシュも消す（共用端末対策）
       await signOut(auth);
       console.log("ログアウトしました！");
       await AppDialog.alert("ログアウトしました。");
@@ -1208,6 +1199,23 @@ function notifyPollAnswer(isChange) {
   });
 }
 
+// ★ 未読カウンター：メッセージを送るとき、ルームの他メンバー全員の users_random/{id}.unreadCounts.{roomId} を +1 する。
+//   受信側（app.html）はこの値を読むだけで未読数が分かるので、ルームごとに件数を数えるクエリが要らなくなる。
+//   ・メッセージの書き込みより「前」に加算する（受信者が部屋を開いていて即「見た」扱いになっても、
+//     加算が後から追いついて未読が残る、という順序の逆転を避けるため）
+//   ・1人分が失敗しても他の人や送信自体には影響させない
+async function bumpUnreadCounts(roomId, memberIds, senderId, delta = 1) {
+  const targets = (memberIds || []).filter((id) => id && id !== senderId);
+  if (targets.length === 0) return;
+  const results = await Promise.allSettled(targets.map((id) =>
+    setDoc(doc(db, "users_random", id), { unreadCounts: { [roomId]: increment(delta) } }, { merge: true })
+  ));
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    console.warn(`未読カウンターの加算に失敗（${failed.length}/${targets.length}件）:`, failed[0].reason);
+  }
+}
+
 async function addMessage(talkId) {
   const message = messageInput.value.trim();
   messageAddButton.disabled = true;
@@ -1216,6 +1224,7 @@ async function addMessage(talkId) {
   const myUserId = user.email.split("@")[0];
   const replyToSnapshot = replyToId; // ★ 送信前に返信先IDを確定させておく
   try {
+    await bumpUnreadCounts(talkId, currentRoomMembers, myUserId);
     await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
         userId: myUserId,
         message: message,     
@@ -1375,6 +1384,10 @@ async function updateLastCheckedTime(talkId, myUserId) {
     await setDoc(doc(db, "users_random", myUserId), {
       lastChecked: {
         [talkId]: serverTimestamp()
+      },
+      // ★ 見たので、このルームの未読カウンターも0に戻す（部屋を開いている間に届いた分が残らないように）
+      unreadCounts: {
+        [talkId]: 0
       }
     }, { merge: true });
     console.log(`${talkId} の最終確認時刻を更新しました`);
@@ -1709,6 +1722,11 @@ async function forwardMessageToRoom(targetRoomId, roomItemEl) {
   const forwardCount = pendingForwardItems.length;
 
   try {
+    // ★ 転送先ルームのメンバーの未読カウンターを、転送する件数ぶん加算する
+    const targetRoomSnapshot = await getDoc(doc(db, "KokoKengaku", targetRoomId));
+    const targetMembers = (targetRoomSnapshot.data() || {}).members || [];
+    await bumpUnreadCounts(targetRoomId, targetMembers, myUserId, forwardCount);
+
     const batch = writeBatch(db);
     const targetTalkCollection = collection(db, "KokoKengaku", targetRoomId, "talk");
 
@@ -2084,6 +2102,7 @@ async function openProfileModal(userId, startEditMode = false) {
   // ★ キャッシュがあれば先にそれを表示し（体感速度優先）、裏で最新データに更新する
   const cached = getUserCache(userId);
   const hasCachedProfileText = !!cached && cached.profileText !== undefined;
+  const isProfileCacheFresh = hasCachedProfileText && isUserCacheFresh(userId);
   profileName.textContent = (cached && cached.name) || "取得中...";
   profileName.classList.toggle("admin", !!(cached && cached.isAdmin));
   profileName.classList.toggle("prize", !!cached && !cached.isAdmin && hasActivePrize(cached));
@@ -2098,8 +2117,8 @@ async function openProfileModal(userId, startEditMode = false) {
   profileEditButton.classList.toggle("hidden", !canEditCurrentProfile);
   profileModal.classList.remove("hidden");
 
-  // ★ すでにステータスメッセージまでキャッシュ済みなら、Firestoreへは再取得しに行かない
-  if (hasCachedProfileText) {
+  // ★ ステータスメッセージまで3時間以内にキャッシュ済みなら、Firestoreへは再取得しに行かない
+  if (isProfileCacheFresh) {
     if (canEditCurrentProfile && startEditMode) {
       handleProfileEditOrSave();
     }
@@ -2224,6 +2243,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const imageUrl = await uploadImageToImgbb(selectedImageFile);
 
       // 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
+      await bumpUnreadCounts(talkId, currentRoomMembers, myUserId);
       await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
         userId: myUserId,
         message: imageMessageInput.value,
@@ -2391,6 +2411,7 @@ async function submitPoll() {
   pollSubmitButton.textContent = "送信中...";
 
   try {
+    await bumpUnreadCounts(talkId, currentRoomMembers, myUserId);
     await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
       userId: myUserId,
       message: question,
