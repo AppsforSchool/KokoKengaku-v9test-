@@ -1,0 +1,12 @@
+{
+  "name": "高校見学",
+  "short_name": "高校見学",
+  "start_url": "./app.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef1f5",
+  "theme_color": "#007AB7",
+  "icons": [
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

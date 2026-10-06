@@ -1,0 +1,103 @@
+/* ---- サイト独自のalert/confirm用モーダル(AppDialog)の共通スタイル ----
+   talk.html / app.html など、appDialog.js を読み込む全ページで共通で使う。
+   「問題投稿」サイト版から移植したもので、色は変更していない（元々ハードコードではなく
+   var(--primary) 等のテーマ変数を参照する作りだったため、このチャットアプリの :root で
+   定義済みの --primary（青系）がそのまま使われ、自動的にこのサイトの配色になる）。
+   ★ 色はテーマカラー(--primary)の単色のみを使い、グラデーションにはしない
+
+   #app-dialog-modal はID指定でオーバーレイ/枠のベーススタイルまで持たせてあるので、
+   そのページに.modal-overlay/.modal-contentが無くても単体でこのファイルだけで正しく表示される。
+   既にmodal-overlay/modal-contentを持つページ(talk.html/app.html)でも、IDセレクタなのでクラス指定と衝突しない。 */
+
+#app-dialog-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(15, 20, 26, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+}
+#app-dialog-modal.hidden {
+  display: none;
+}
+#app-dialog-modal .modal-content {
+  background: var(--surface);
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.app-dialog-content {
+  max-width: 360px;
+}
+.app-dialog-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text);
+  margin-bottom: 0.6rem;
+}
+.app-dialog-message {
+  font-size: 0.92rem;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-line;
+  margin-bottom: 1.3rem;
+}
+.app-dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+#app-dialog-ok-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.75rem 1.2rem;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
+}
+#app-dialog-ok-button:hover {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+}
+#app-dialog-ok-button:active {
+  transform: scale(0.98);
+}
+#app-dialog-ok-button.app-dialog-danger {
+  background-color: #d64545;
+}
+#app-dialog-ok-button.app-dialog-danger:hover {
+  background-color: #b83a3a;
+}
+#app-dialog-cancel-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.75rem 1.2rem;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s var(--ease);
+}
+#app-dialog-cancel-button:hover {
+  background-color: var(--border);
+}
